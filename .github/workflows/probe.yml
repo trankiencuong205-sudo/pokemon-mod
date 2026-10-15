@@ -1,0 +1,42 @@
+name: Cobblemon probe
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/probe.yml']
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maven metadata (ImpactDev)
+        run: |
+          curl -sSL -m 60 https://maven.impactdev.net/repository/development/com/cobblemon/fabric/maven-metadata.xml | tee meta.xml | head -60 || true
+      - name: Download newest Cobblemon Fabric 1.21.1 from Modrinth
+        run: |
+          curl -sSL -m 60 'https://api.modrinth.com/v2/project/cobblemon/version?game_versions=%5B%221.21.1%22%5D&loaders=%5B%22fabric%22%5D' -o v.json
+          jq -r '.[0] | {version_number, date_published, deps: .dependencies, file: (.files[0] | {filename, url, size})}' v.json
+          URL=$(jq -r '.[0].files[0].url' v.json)
+          curl -sSL -m 300 "$URL" -o cobblemon.jar
+          ls -l cobblemon.jar
+      - name: Inspect jar
+        run: |
+          mkdir x && cd x && unzip -q ../cobblemon.jar
+          echo "=== fabric.mod.json (depends/entrypoints)"
+          jq '{id, version, depends, entrypoints, jars}' fabric.mod.json
+          echo "=== nested jars"; ls META-INF/jars 2>/dev/null || true
+          echo "=== api packages"
+          find com/cobblemon/mod/common/api -type d | sed 's#/$##' | sort | head -150
+          find com/cobblemon/mod/common/api -name '*.class' | sed 's#\.class$##' | sort > ../api_classes.txt
+          wc -l ../api_classes.txt
+      - name: Event classes and key signatures
+        run: |
+          cd x
+          grep -E 'api/events/' ../api_classes.txt | grep -vE '\$' | head -200
+          echo "=== CobblemonEvents fields"
+          javap -cp . -public com.cobblemon.mod.common.api.events.CobblemonEvents | head -150
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cobblemon-probe
+          path: |
+            meta.xml
+            v.json
+            api_classes.txt
